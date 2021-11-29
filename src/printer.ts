@@ -1,601 +1,628 @@
-import { FastPath } from './fastPath';
-import { Doc, concat, join, indent, hardline, softline, group, line } from './docBuilder';
-import { willBreak, propagateBreaks } from './docUtils';
+import { FastPath } from './fastPath'
+import {
+  Doc,
+  concat,
+  join,
+  indent,
+  hardline,
+  softline,
+  group,
+  line,
+} from './docBuilder'
+import { willBreak, propagateBreaks } from './docUtils'
 
-import { printComments, printDanglingComments, printDanglingStatementComments } from './comments';
-import { locEnd, isNextLineEmpty, hasNewLineInRange } from './util';
-import { Options, getStringQuotemark, getAlternativeStringQuotemark, Quotemark } from './options';
+import {
+  printComments,
+  printDanglingComments,
+  printDanglingStatementComments,
+} from './comments'
+import { locEnd, isNextLineEmpty, hasNewLineInRange } from './util'
+import {
+  Options,
+  getStringQuotemark,
+  getAlternativeStringQuotemark,
+  Quotemark,
+} from './options'
 
-import * as luaparse from 'luaparse';
+import * as luaparse from 'luaparse'
 
-export type PrintFn = (path: FastPath) => Doc;
+export type PrintFn = (path: FastPath) => Doc
 
 // Prints a sequence of statements with a newline separating them..
 // ex:
 //  local a = 1
 //  local b = 2
-function printStatementSequence(path: FastPath, options: Options, print: PrintFn): Doc {
-    const printed: Doc[] = [];
+function printStatementSequence(
+  path: FastPath,
+  options: Options,
+  print: PrintFn
+): Doc {
+  const printed: Doc[] = []
 
-    path.forEach((statementPath) => {
-        const parts = [print(statementPath)];
+  path.forEach((statementPath) => {
+    const parts = [print(statementPath)]
 
-        if (isNextLineEmpty(options.sourceText, locEnd(statementPath.getValue())) && !isLastStatement(path)) {
-            parts.push(hardline);
-        }
+    if (
+      isNextLineEmpty(options.sourceText, locEnd(statementPath.getValue())) &&
+      !isLastStatement(path)
+    ) {
+      parts.push(hardline)
+    }
 
-        printed.push(concat(parts));
-    });
+    printed.push(concat(parts))
+  })
 
-    return join(hardline, printed);
+  return join(hardline, printed)
 }
 
 // Same as printStatementSequence, however the statements are indented
-function printIndentedStatementList(path: FastPath, options: Options, print: PrintFn, field: string): Doc {
-    const printedBody = path.call((bodyPath) => {
-        return printStatementSequence(bodyPath, options, print);
-    }, field);
+function printIndentedStatementList(
+  path: FastPath,
+  options: Options,
+  print: PrintFn,
+  field: string
+): Doc {
+  const printedBody = path.call((bodyPath) => {
+    return printStatementSequence(bodyPath, options, print)
+  }, field)
 
-    return indent(concat([hardline, printedBody]));
+  return indent(concat([hardline, printedBody]))
 }
 
 // Prints a comment present at the end of a statement leading to a block, which would otherwise fall into the body of
 // the statement. Doing so might remove contextual information in the comment.
 function printDanglingStatementComment(path: FastPath) {
-    const comments = (path.getValue() as any).attachedComments;
-    if (!comments) { return ''; }
+  const comments = (path.getValue() as any).attachedComments
+  if (!comments) {
+    return ''
+  }
 
-    return concat([printDanglingStatementComments(path), printDanglingComments(path)]);
+  return concat([
+    printDanglingStatementComments(path),
+    printDanglingComments(path),
+  ])
 }
 
 function makeStringLiteral(raw: string, quotemark: Quotemark) {
-    const preferredQuoteCharacter = getStringQuotemark(quotemark);
-    const alternativeQuoteCharacter = getAlternativeStringQuotemark(quotemark === 'single' ? 'single' : 'double');
+  const preferredQuoteCharacter = getStringQuotemark(quotemark)
+  const alternativeQuoteCharacter = getAlternativeStringQuotemark(
+    quotemark === 'single' ? 'single' : 'double'
+  )
 
-    const newString = raw.replace(/\\([\s\S])|(['"])/g, (match, escaped, quote) => {
-        if (escaped === alternativeQuoteCharacter) {
-            return escaped;
-        }
+  const newString = raw.replace(
+    /\\([\s\S])|(['"])/g,
+    (match, escaped, quote) => {
+      if (escaped === alternativeQuoteCharacter) {
+        return escaped
+      }
 
-        if (quote === preferredQuoteCharacter) {
-            return '\\' + quote;
-        }
+      if (quote === preferredQuoteCharacter) {
+        return '\\' + quote
+      }
 
-        return match;
-    });
+      return match
+    }
+  )
 
-    return preferredQuoteCharacter + newString + preferredQuoteCharacter;
+  return preferredQuoteCharacter + newString + preferredQuoteCharacter
 }
 
 function printStringLiteral(path: FastPath, options: Options): Doc {
-    const literal = path.getValue() as luaparse.StringLiteral;
-    if (literal.type !== 'StringLiteral') {
-        throw new Error('printStringLiteral: Expected StringLiteral, got ' + literal.type);
-    }
+  const literal = path.getValue() as luaparse.StringLiteral
+  if (literal.type !== 'StringLiteral') {
+    throw new Error(
+      'printStringLiteral: Expected StringLiteral, got ' + literal.type
+    )
+  }
 
-    // Ignore raw string literals as they have no leading/trailing quotes.
-    if (literal.raw.startsWith('[[') || literal.raw.startsWith('[=')) {
-        return literal.raw;
-    }
+  // Ignore raw string literals as they have no leading/trailing quotes.
+  if (literal.raw.startsWith('[[') || literal.raw.startsWith('[=')) {
+    return literal.raw
+  }
 
-    // Strip off the leading and trailing quote characters from the raw string
-    const raw = literal.raw.slice(1, -1);
+  // Strip off the leading and trailing quote characters from the raw string
+  const raw = literal.raw.slice(1, -1)
 
-    let preferredQuotemark = options.quotemark;
-    const preferredQuoteCharacter = getStringQuotemark(preferredQuotemark);
+  let preferredQuotemark = options.quotemark
+  const preferredQuoteCharacter = getStringQuotemark(preferredQuotemark)
 
-    // If the string literal already contains the preferred quote character, then use the alternative to improve
-    // potential readability issues.
-    if (raw.includes(preferredQuoteCharacter)) {
-        preferredQuotemark = preferredQuotemark === 'single' ? 'double' : 'single';
-    }
+  // If the string literal already contains the preferred quote character, then use the alternative to improve
+  // potential readability issues.
+  if (raw.includes(preferredQuoteCharacter)) {
+    preferredQuotemark = preferredQuotemark === 'single' ? 'double' : 'single'
+  }
 
-    return makeStringLiteral(raw, preferredQuotemark);
+  return makeStringLiteral(raw, preferredQuotemark)
 }
 
 function isLastStatement(path: FastPath) {
-    const parent = path.getParent();
-    const node = path.getValue();
-    const body = parent.body;
+  const parent = path.getParent()
+  const node = path.getValue()
+  const body = parent.body
 
-    return body && body[body.length - 1] === node;
+  return body && body[body.length - 1] === node
 }
 
 function printNodeNoParens(path: FastPath, options: Options, print: PrintFn) {
-    const value = path.getValue();
+  const value = path.getValue()
 
-    if (!value) {
-        return '';
+  if (!value) {
+    return ''
+  }
+
+  const parts: Doc[] = []
+
+  const node = value as luaparse.Node
+
+  switch (node.type) {
+    case 'Chunk':
+      parts.push(
+        path.call((bodyPath) => {
+          return printStatementSequence(bodyPath, options, print)
+        }, 'body')
+      )
+
+      parts.push(printDanglingComments(path, true))
+
+      if (node.body.length || (node as any).attachedComments) {
+        parts.push(hardline)
+      }
+
+      return concat(parts)
+
+    // Statements
+    case 'LabelStatement':
+      return concat(['::', path.call(print, 'label'), '::'])
+
+    case 'GotoStatement':
+      return concat(['goto ', path.call(print, 'label')])
+
+    case 'BreakStatement':
+      return 'break'
+
+    case 'ReturnStatement':
+      parts.push('return')
+
+      if (node.arguments.length > 0) {
+        parts.push(' ')
+        parts.push(join(', ', path.map(print, 'arguments')))
+      }
+
+      return concat(parts)
+
+    case 'WhileStatement':
+      parts.push('while ')
+      parts.push(path.call(print, 'condition'))
+      parts.push(' do')
+
+      parts.push(printDanglingStatementComment(path))
+
+      if (node.body.length) {
+        parts.push(printIndentedStatementList(path, options, print, 'body'))
+      }
+
+      parts.push(concat([hardline, 'end']))
+
+      return concat(parts)
+
+    case 'DoStatement':
+      parts.push('do')
+
+      parts.push(printDanglingStatementComment(path))
+
+      if (node.body.length) {
+        parts.push(printIndentedStatementList(path, options, print, 'body'))
+      }
+
+      parts.push(concat([hardline, 'end']))
+
+      return concat(parts)
+
+    case 'RepeatStatement':
+      parts.push('repeat')
+
+      parts.push(printDanglingStatementComment(path))
+
+      if (node.body.length) {
+        parts.push(printIndentedStatementList(path, options, print, 'body'))
+      }
+
+      parts.push(concat([hardline, 'until ']))
+      parts.push(path.call(print, 'condition'))
+
+      return concat(parts)
+
+    case 'LocalStatement':
+    case 'AssignmentStatement': {
+      const left = []
+
+      if (node.type === 'LocalStatement') {
+        left.push('local ')
+      }
+
+      const shouldBreak = options.linebreakMultipleAssignments
+
+      left.push(
+        indent(
+          join(
+            concat([',', shouldBreak ? hardline : line]),
+            path.map(print, 'variables')
+          )
+        )
+      )
+
+      let operator = ''
+
+      const right = []
+      if (node.init.length) {
+        operator = ' ='
+
+        if (node.init.length > 1) {
+          right.push(indent(join(concat([',', line]), path.map(print, 'init'))))
+        } else {
+          right.push(join(concat([',', line]), path.map(print, 'init')))
+        }
+      }
+
+      // HACK: This definitely needs to be improved, as I'm sure TableConstructorExpression isn't the only
+      // candidate that falls under this critera.
+      //
+      // Due to the nature of how groups break, if the TableConstructorExpression contains a newline (and
+      // thusly breaks), the break will propagate all the way up to the group on the left of the assignment.
+      // This results in the table's initial { character being moved to a separate line.
+      //
+      // There's probably a much better way of doing this, but it works for now.
+      const canBreakLine = node.init.some(
+        (n) =>
+          n != null &&
+          n.type !== 'TableConstructorExpression' &&
+          n.type !== 'FunctionDeclaration'
+      )
+
+      return group(
+        concat([
+          group(concat(left)),
+          group(
+            concat([operator, canBreakLine ? indent(line) : ' ', concat(right)])
+          ),
+        ])
+      )
     }
 
-    const parts: Doc[] = [];
+    case 'CallStatement':
+      return path.call(print, 'expression')
 
-    const node = value as luaparse.Node;
+    case 'FunctionDeclaration':
+      if (node.isLocal) {
+        parts.push('local ')
+      }
 
-    switch (node.type) {
-        case 'Chunk':
-            parts.push(
-                path.call((bodyPath) => {
-                    return printStatementSequence(bodyPath, options, print);
-                }, 'body'));
+      parts.push('function')
 
-            parts.push(printDanglingComments(path, true));
+      if (node.identifier) {
+        parts.push(' ', path.call(print, 'identifier'))
+      }
 
-            if (node.body.length || (node as any).attachedComments) {
-                parts.push(hardline);
-            }
+      parts.push(
+        concat([
+          '(',
+          group(
+            indent(
+              concat([
+                softline,
+                join(concat([',', line]), path.map(print, 'parameters')),
+              ])
+            )
+          ),
+          ')',
+        ])
+      )
 
-            return concat(parts);
+      parts.push(printDanglingStatementComment(path))
 
-        // Statements
-        case 'LabelStatement':
-            return concat(['::', path.call(print, 'label'), '::']);
+      if (node.body.length) {
+        parts.push(printIndentedStatementList(path, options, print, 'body'))
+      }
 
-        case 'GotoStatement':
-            return concat(['goto ', path.call(print, 'label')]);
+      parts.push(hardline, 'end')
 
-        case 'BreakStatement':
-            return 'break';
+      return concat(parts)
 
-        case 'ReturnStatement':
-            parts.push('return');
+    case 'ForNumericStatement':
+      parts.push('for ')
+      parts.push(path.call(print, 'variable'))
+      parts.push(' = ')
+      parts.push(path.call(print, 'start'))
+      parts.push(', ')
+      parts.push(path.call(print, 'end'))
 
-            if (node.arguments.length > 0) {
-                parts.push(' ');
-                parts.push(join(', ', path.map(print, 'arguments')));
-            }
+      if (node.step) {
+        parts.push(', ')
+        parts.push(path.call(print, 'step'))
+      }
 
-            return concat(parts);
+      parts.push(' do')
 
-        case 'WhileStatement':
-            parts.push('while ');
-            parts.push(path.call(print, 'condition'));
-            parts.push(' do');
+      parts.push(printDanglingStatementComment(path))
 
-            parts.push(printDanglingStatementComment(path));
+      if (node.body.length) {
+        parts.push(printIndentedStatementList(path, options, print, 'body'))
+      }
 
-            if (node.body.length) {
-                parts.push(printIndentedStatementList(path, options, print, 'body'));
-            }
+      parts.push(concat([hardline, 'end']))
 
-            parts.push(concat([hardline, 'end']));
+      return concat(parts)
 
-            return concat(parts);
+    case 'ForGenericStatement':
+      parts.push('for ')
+      parts.push(join(', ', path.map(print, 'variables')))
+      parts.push(' in ')
+      parts.push(join(', ', path.map(print, 'iterators')))
+      parts.push(' do')
 
-        case 'DoStatement':
-            parts.push('do');
+      parts.push(printDanglingStatementComment(path))
 
-            parts.push(printDanglingStatementComment(path));
+      if (node.body.length) {
+        parts.push(printIndentedStatementList(path, options, print, 'body'))
+      }
 
-            if (node.body.length) {
-                parts.push(printIndentedStatementList(path, options, print, 'body'));
-            }
+      parts.push(concat([hardline, 'end']))
 
-            parts.push(concat([hardline, 'end']));
+      return concat(parts)
 
-            return concat(parts);
+    case 'IfStatement':
+      const printed: Doc[] = []
+      path.forEach((statementPath) => {
+        printed.push(print(statementPath))
+      }, 'clauses')
 
-        case 'RepeatStatement':
-            parts.push('repeat');
+      parts.push(join(hardline, printed))
+      parts.push(concat([hardline, 'end']))
 
-            parts.push(printDanglingStatementComment(path));
+      return concat(parts)
 
-            if (node.body.length) {
-                parts.push(printIndentedStatementList(path, options, print, 'body'));
-            }
-
-            parts.push(concat([hardline, 'until ']));
-            parts.push(path.call(print, 'condition'));
-
-            return concat(parts);
-
-        case 'LocalStatement':
-        case 'AssignmentStatement':
-            {
-                const left = [];
-
-                if (node.type === 'LocalStatement') {
-                    left.push('local ');
-                }
-
-                const shouldBreak = options.linebreakMultipleAssignments;
-
-                left.push(
-                    indent(
-                        join(
-                            concat([
-                                ',',
-                                shouldBreak ? hardline : line
-                            ]),
-                            path.map(print, 'variables')
-                        )
-                    )
-                );
-
-                let operator = '';
-
-                const right = [];
-                if (node.init.length) {
-                    operator = ' =';
-
-                    if (node.init.length > 1) {
-                        right.push(
-                            indent(
-                                join(
-                                    concat([',', line]), path.map(print, 'init')
-                                )
-                            )
-                        );
-                    } else {
-                        right.push(
-                            join(concat([',', line]), path.map(print, 'init'))
-                        );
-                    }
-                }
-
-                // HACK: This definitely needs to be improved, as I'm sure TableConstructorExpression isn't the only
-                // candidate that falls under this critera.
-                //
-                // Due to the nature of how groups break, if the TableConstructorExpression contains a newline (and
-                // thusly breaks), the break will propagate all the way up to the group on the left of the assignment.
-                // This results in the table's initial { character being moved to a separate line.
-                //
-                // There's probably a much better way of doing this, but it works for now.
-                const canBreakLine = node.init.some(n =>
-                    n != null &&
-                    n.type !== 'TableConstructorExpression' &&
-                    n.type !== 'FunctionDeclaration'
-                );
-
-                return group(
-                    concat([
-                        group(concat(left)),
-                        group(
-                            concat([
-                                operator,
-                                canBreakLine ? indent(line) : ' ',
-                                concat(right)
-                            ])
-                        )
-                    ])
-                );
-            }
-
-        case 'CallStatement':
-            return path.call(print, 'expression');
-
-        case 'FunctionDeclaration':
-            if (node.isLocal) {
-                parts.push('local ');
-            }
-
-            parts.push('function');
-
-            if (node.identifier) {
-                parts.push(' ', path.call(print, 'identifier'));
-            }
-
-            parts.push(concat([
-                '(',
-                group(
-                    indent(
-                        concat([
-                            softline,
-                            join(concat([',', line]), path.map(print, 'parameters'))
-                        ])
-                    )
-                ),
-                ')'
+    // Clauses
+    case 'IfClause':
+      parts.push(
+        concat([
+          'if ',
+          group(
+            concat([
+              indent(concat([softline, path.call(print, 'condition')])),
+              softline,
             ])
-            );
+          ),
+          ' then',
+        ])
+      )
 
-            parts.push(printDanglingStatementComment(path));
+      parts.push(printDanglingStatementComment(path))
 
-            if (node.body.length) {
-                parts.push(printIndentedStatementList(path, options, print, 'body'));
-            }
+      if (node.body.length) {
+        parts.push(printIndentedStatementList(path, options, print, 'body'))
+      }
 
-            parts.push(hardline, 'end');
+      return concat(parts)
 
-            return concat(parts);
+    case 'ElseifClause':
+      parts.push(
+        concat([
+          'elseif ',
+          group(
+            concat([
+              indent(concat([softline, path.call(print, 'condition')])),
+              softline,
+            ])
+          ),
+          ' then',
+        ])
+      )
 
-        case 'ForNumericStatement':
-            parts.push('for ');
-            parts.push(path.call(print, 'variable'));
-            parts.push(' = ');
-            parts.push(path.call(print, 'start'));
-            parts.push(', ');
-            parts.push(path.call(print, 'end'));
+      parts.push(printDanglingStatementComment(path))
 
-            if (node.step) {
-                parts.push(', ');
-                parts.push(path.call(print, 'step'));
-            }
+      if (node.body.length) {
+        parts.push(printIndentedStatementList(path, options, print, 'body'))
+      }
 
-            parts.push(' do');
+      return concat(parts)
 
-            parts.push(printDanglingStatementComment(path));
+    case 'ElseClause':
+      parts.push('else')
 
-            if (node.body.length) {
-                parts.push(printIndentedStatementList(path, options, print, 'body'));
-            }
+      parts.push(printDanglingStatementComment(path))
 
-            parts.push(concat([hardline, 'end']));
+      if (node.body.length) {
+        parts.push(printIndentedStatementList(path, options, print, 'body'))
+      }
 
-            return concat(parts);
+      return concat(parts)
 
-        case 'ForGenericStatement':
-            parts.push('for ');
-            parts.push(join(', ', path.map(print, 'variables')));
-            parts.push(' in ');
-            parts.push(join(', ', path.map(print, 'iterators')));
-            parts.push(' do');
+    // Literals
+    case 'BooleanLiteral':
+      return node.raw
 
-            parts.push(printDanglingStatementComment(path));
+    case 'NilLiteral':
+      return 'nil'
 
-            if (node.body.length) {
-                parts.push(printIndentedStatementList(path, options, print, 'body'));
-            }
+    case 'NumericLiteral':
+      return node.raw
 
-            parts.push(concat([hardline, 'end']));
+    case 'StringLiteral':
+      return printStringLiteral(path, options)
 
-            return concat(parts);
+    case 'VarargLiteral':
+      return '...'
 
-        case 'IfStatement':
-            const printed: Doc[] = [];
-            path.forEach((statementPath) => {
-                printed.push(print(statementPath));
-            }, 'clauses');
+    case 'Identifier':
+      return node.name
 
-            parts.push(join(hardline, printed));
-            parts.push(concat([hardline, 'end']));
+    // Expressions
+    case 'BinaryExpression':
+    case 'LogicalExpression':
+      const parent = path.getParent() as luaparse.Node
+      const shouldGroup =
+        parent.type !== node.type &&
+        node.left.type !== node.type &&
+        node.right.type !== node.type
 
-            return concat(parts);
+      const right = concat([node.operator, line, path.call(print, 'right')])
 
-        // Clauses
-        case 'IfClause':
-            parts.push(concat([
-                'if ',
-                group(
-                    concat([
-                        indent(concat([
-                            softline,
-                            path.call(print, 'condition')
-                        ])),
-                        softline
-                    ])
-                ),
-                ' then'
-            ]));
+      return group(
+        concat([
+          path.call(print, 'left'),
+          indent(concat([' ', shouldGroup ? group(right) : right])),
+        ])
+      )
 
-            parts.push(printDanglingStatementComment(path));
+    case 'UnaryExpression':
+      parts.push(node.operator)
 
-            if (node.body.length) {
-                parts.push(printIndentedStatementList(path, options, print, 'body'));
-            }
+      if (node.operator === 'not') {
+        parts.push(' ')
+      }
 
-            return concat(parts);
+      parts.push(path.call(print, 'argument'))
 
-        case 'ElseifClause':
-            parts.push(concat([
-                'elseif ',
-                group(
-                    concat([
-                        indent(concat([
-                            softline,
-                            path.call(print, 'condition')
-                        ])),
-                        softline
-                    ])
-                ),
-                ' then'
-            ]));
+      return concat(parts)
 
-            parts.push(printDanglingStatementComment(path));
+    case 'MemberExpression':
+      return concat([
+        path.call(print, 'base'),
+        node.indexer,
+        path.call(print, 'identifier'),
+      ])
 
-            if (node.body.length) {
-                parts.push(printIndentedStatementList(path, options, print, 'body'));
-            }
+    case 'IndexExpression':
+      return concat([
+        path.call(print, 'base'),
+        '[',
+        group(
+          concat([
+            indent(concat([softline, path.call(print, 'index')])),
+            softline,
+          ])
+        ),
+        ']',
+      ])
 
-            return concat(parts);
+    case 'CallExpression':
+      const printedCallExpressionArgs = path.map(print, 'arguments')
 
-        case 'ElseClause':
-            parts.push('else');
+      // TODO: We should implement prettier's conditionalGroup construct to try and fit the most appropriately
+      // fitting combination of argument layout. I.e: If all arguments but the last fit on the same line, and the
+      // last argument is a table, it would be beneficial to break on the table, rather than breaking the entire
+      // argument list.
 
-            parts.push(printDanglingStatementComment(path));
+      return concat([
+        path.call(print, 'base'),
+        group(
+          concat([
+            '(',
+            indent(
+              concat([
+                softline,
+                join(concat([',', line]), printedCallExpressionArgs),
+              ])
+            ),
+            softline,
+            ')',
+          ]),
+          printedCallExpressionArgs.some(willBreak)
+        ),
+      ])
 
-            if (node.body.length) {
-                parts.push(printIndentedStatementList(path, options, print, 'body'));
-            }
+    case 'TableCallExpression':
+      parts.push(path.call(print, 'base'))
+      parts.push(' ')
+      parts.push(path.call(print, 'arguments'))
 
-            return concat(parts);
+      return concat(parts)
 
-        // Literals
-        case 'BooleanLiteral':
-            return node.raw;
+    case 'StringCallExpression':
+      parts.push(path.call(print, 'base'))
+      parts.push(' ')
+      parts.push(path.call(print, 'argument'))
 
-        case 'NilLiteral':
-            return 'nil';
+      return concat(parts)
 
-        case 'NumericLiteral':
-            return node.raw;
+    case 'TableConstructorExpression':
+      if (node.fields.length === 0) {
+        return '{}'
+      }
 
-        case 'StringLiteral':
-            return printStringLiteral(path, options);
+      const fields: Doc[] = []
+      let separatorParts: Doc[] = []
 
-        case 'VarargLiteral':
-            return '...';
+      path.forEach((childPath) => {
+        fields.push(concat(separatorParts))
+        fields.push(group(print(childPath)))
 
-        case 'Identifier':
-            return node.name;
+        separatorParts = [',', line]
+      }, 'fields')
 
-        // Expressions
-        case 'BinaryExpression':
-        case 'LogicalExpression':
-            const parent = path.getParent() as luaparse.Node;
-            const shouldGroup = parent.type !== node.type &&
-                node.left.type !== node.type &&
-                node.right.type !== node.type;
+      // If the user has placed their own linebreaks in the table, they probably want them to be preserved
+      const shouldBreak = hasNewLineInRange(
+        options.sourceText,
+        node.range[0],
+        node.range[1]
+      )
 
-            const right = concat([
-                node.operator,
-                line,
-                path.call(print, 'right')
-            ]);
+      return group(
+        concat([
+          '{',
+          indent(concat([softline, concat(fields)])),
+          softline,
+          '}',
+        ]),
+        shouldBreak
+      )
 
-            return group(
-                concat([
-                    path.call(print, 'left'),
-                    indent(concat([
-                        ' ', shouldGroup ? group(right) : right
-                    ]))
-                ])
-            );
+    case 'TableKeyString':
+      return concat([path.call(print, 'key'), ' = ', path.call(print, 'value')])
 
-        case 'UnaryExpression':
-            parts.push(node.operator);
+    case 'TableKey':
+      return concat([
+        '[',
+        path.call(print, 'key'),
+        ']',
+        ' = ',
+        path.call(print, 'value'),
+      ])
 
-            if (node.operator === 'not') {
-                parts.push(' ');
-            }
+    case 'TableValue':
+      return path.call(print, 'value')
+  }
 
-            parts.push(path.call(print, 'argument'));
-
-            return concat(parts);
-
-        case 'MemberExpression':
-            return concat([
-                path.call(print, 'base'),
-                node.indexer,
-                path.call(print, 'identifier')
-            ]);
-
-        case 'IndexExpression':
-            return concat([
-                path.call(print, 'base'),
-                '[',
-                group(
-                    concat([
-                        indent(concat([softline, path.call(print, 'index')])),
-                        softline
-                    ])
-                ),
-                ']'
-            ]);
-
-        case 'CallExpression':
-            const printedCallExpressionArgs = path.map(print, 'arguments');
-
-            // TODO: We should implement prettier's conditionalGroup construct to try and fit the most appropriately
-            // fitting combination of argument layout. I.e: If all arguments but the last fit on the same line, and the
-            // last argument is a table, it would be beneficial to break on the table, rather than breaking the entire
-            // argument list.
-
-            return concat([
-                path.call(print, 'base'),
-                group(
-                    concat([
-                        '(',
-                        indent(
-                            concat([softline, join(concat([',', line]), printedCallExpressionArgs)])
-                        ),
-                        softline,
-                        ')'
-                    ]),
-                    printedCallExpressionArgs.some(willBreak)
-                )
-            ]);
-
-        case 'TableCallExpression':
-            parts.push(path.call(print, 'base'));
-            parts.push(' ');
-            parts.push(path.call(print, 'arguments'));
-
-            return concat(parts);
-
-        case 'StringCallExpression':
-            parts.push(path.call(print, 'base'));
-            parts.push(' ');
-            parts.push(path.call(print, 'argument'));
-
-            return concat(parts);
-
-        case 'TableConstructorExpression':
-            if (node.fields.length === 0) {
-                return '{}';
-            }
-
-            const fields: Doc[] = [];
-            let separatorParts: Doc[] = [];
-
-            path.forEach(childPath => {
-                fields.push(concat(separatorParts));
-                fields.push(group(print(childPath)));
-
-                separatorParts = [',', line];
-            }, 'fields');
-
-            // If the user has placed their own linebreaks in the table, they probably want them to be preserved
-            const shouldBreak = hasNewLineInRange(options.sourceText, node.range[0], node.range[1]);
-
-            return group(
-                concat([
-                    '{',
-                    indent(
-                        concat([softline, concat(fields)])
-                    ),
-                    softline,
-                    '}'
-                ]),
-                shouldBreak
-            );
-
-        case 'TableKeyString':
-            return concat([
-                path.call(print, 'key'),
-                ' = ',
-                path.call(print, 'value')
-            ]);
-
-        case 'TableKey':
-            return concat([
-                '[', path.call(print, 'key'), ']',
-                ' = ',
-                path.call(print, 'value')
-            ]);
-
-        case 'TableValue':
-            return path.call(print, 'value');
-    }
-
-    throw new Error('Unhandled AST node: ' + node.type);
+  throw new Error('Unhandled AST node: ' + node.type)
 }
 
 function printNode(path: FastPath, options: Options, print: PrintFn) {
-    const printed = printNodeNoParens(path, options, print);
+  const printed = printNodeNoParens(path, options, print)
 
-    const parts = [];
-    const needsParens = path.needsParens();
-    if (needsParens) {
-        parts.push('(');
-    }
+  const parts = []
+  const needsParens = path.needsParens()
+  if (needsParens) {
+    parts.push('(')
+  }
 
-    parts.push(printed);
+  parts.push(printed)
 
-    if (needsParens) {
-        parts.push(')');
-    }
+  if (needsParens) {
+    parts.push(')')
+  }
 
-    return concat(parts);
+  return concat(parts)
 }
 
 export function buildDocFromAst(ast: luaparse.Chunk, options: Options) {
-    const printNodeWithComments = (path: FastPath): Doc => {
-        return printComments(path, options, p => printNode(p, options, printNodeWithComments));
-    };
+  const printNodeWithComments = (path: FastPath): Doc => {
+    return printComments(path, options, (p) =>
+      printNode(p, options, printNodeWithComments)
+    )
+  }
 
-    const doc = printNodeWithComments(new FastPath(ast));
-    propagateBreaks(doc);
+  const doc = printNodeWithComments(new FastPath(ast))
+  propagateBreaks(doc)
 
-    return doc;
+  return doc
 }
