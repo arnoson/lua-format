@@ -1,5 +1,5 @@
 import { Doc } from './docBuilder'
-import { isNode } from './utils'
+import { isNode, hasPrecedence, needsPrecedence } from './utils'
 
 import * as luaparse from 'luaparse'
 
@@ -90,43 +90,6 @@ export class FastPath {
   public needsParens() {
     const parent = this.getParent() as luaparse.Node
     const value = this.getValue() as luaparse.Node
-
-    let inParens = false
-    switch (value.type) {
-      case 'FunctionDeclaration':
-      case 'Chunk':
-      case 'Identifier':
-      case 'BooleanLiteral':
-      case 'NilLiteral':
-      case 'NumericLiteral':
-      case 'StringLiteral':
-      case 'VarargLiteral':
-      case 'TableConstructorExpression':
-      case 'BinaryExpression':
-      case 'LogicalExpression':
-      case 'UnaryExpression':
-      case 'MemberExpression':
-      case 'IndexExpression':
-      case 'CallExpression':
-      case 'TableCallExpression':
-      case 'StringCallExpression':
-        inParens = value.inParens || false
-    }
-
-    if (parent) {
-      /*
-                If this UnaryExpression is nested below another UnaryExpression, wrap the nested expression in
-                parens. This not only improves readability of complex expressions, but also prevents `- -1` from
-                becoming `--1`, which would result in a comment.
-            */
-      if (
-        value.type === 'UnaryExpression' &&
-        parent.type === 'UnaryExpression'
-      ) {
-        inParens = true
-      }
-    }
-
-    return inParens
+    return parent && hasPrecedence(parent) && needsPrecedence(value)
   }
 }
