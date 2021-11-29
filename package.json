@@ -20,7 +20,7 @@
   "typings": "dist/index.d.js",
   "scripts": {
     "dev": "rollup --config --watch",
-    "dev-runner": "nodemon -r esbuild-register src/testPrinter.ts",
+    "dev-printer": "nodemon -r esbuild-register src/testPrinter.ts",
     "build": "rollup --config --environment BUILD:production"
   },
   "devDependencies": {

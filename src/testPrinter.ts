@@ -1,10 +1,11 @@
-import * as luafmt from './index'
+import { formatText } from './index'
+import { readFileSync } from 'fs'
 
-import * as fs from 'fs'
+const file = readFileSync('test/lua-5.3.4-tests/calls.lua', {
+  encoding: 'utf8',
+})
 
-const file = fs.readFileSync('test/lua-5.3.4-tests/calls.lua')
-
-const formatted = luafmt.formatText(file.toString(), {
+const formatted = formatText(file, {
   lineWidth: 60,
   quotemark: 'single',
 })
