@@ -16,7 +16,7 @@ import {
   printDanglingComments,
   printDanglingStatementComments,
 } from './comments'
-import { locEnd, isNextLineEmpty, hasNewLineInRange } from './util'
+import { locEnd, isNextLineEmpty, hasNewLineInRange } from './utils'
 import {
   Options,
   getStringQuotemark,

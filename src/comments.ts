@@ -15,7 +15,7 @@ import {
   isNextLineEmpty,
   hasNewLine,
   isPreviousLineEmpty,
-} from './util'
+} from './utils'
 import { Options } from './options'
 
 import * as luaparse from 'luaparse'

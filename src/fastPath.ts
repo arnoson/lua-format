@@ -1,5 +1,5 @@
 import { Doc } from './docBuilder'
-import { isNode } from './util'
+import { isNode } from './utils'
 
 import * as luaparse from 'luaparse'
 
