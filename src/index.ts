@@ -1,7 +1,3 @@
-if (process.env.NODE_ENV === 'development') {
-  require('source-map-support').install()
-}
-
 import { attachComments, injectShebang } from './comments'
 import { buildDocFromAst } from './printer'
 import { printDocToString } from './docPrinter'
@@ -9,8 +5,6 @@ import { UserOptions, defaultOptions } from './options'
 
 import { parse } from 'luaparse'
 import { createPatch } from 'diff'
-
-export { UserOptions, defaultOptions, WriteMode } from './options'
 
 export function formatText(text: string, userOptions?: UserOptions) {
   const ast = parse(text, {
