@@ -1,5 +1,5 @@
 import { Doc } from './docBuilder'
-import { isNode, hasPrecedence, needsPrecedence } from './utils'
+import { isNode, getOperatorPrecedence, shouldFlatten } from './utils'
 
 import * as luaparse from 'luaparse'
 
@@ -89,7 +89,105 @@ export class FastPath {
 
   public needsParens() {
     const parent = this.getParent() as luaparse.Node
-    const value = this.getValue() as luaparse.Node
-    return parent && hasPrecedence(parent) && needsPrecedence(value)
+    const node = this.getValue() as luaparse.Node
+
+    if (!parent) return false
+
+    switch (node.type) {
+      case 'Identifier':
+      case 'IndexExpression':
+      case 'MemberExpression':
+        return false
+
+      // Todo: check if there are cases where these need parens.
+      case 'CallExpression':
+      case 'VarargLiteral':
+      case 'TableCallExpression':
+        return false
+
+      case 'StringCallExpression':
+        if (parent.type === 'TableValue') {
+          return true
+        } else if (parent.type === 'ReturnStatement') {
+          return !(parent.arguments.indexOf(node) < parent.arguments.length - 1)
+        } else if (
+          parent.type === 'LocalStatement' ||
+          parent.type === 'AssignmentStatement'
+        ) {
+          if (parent.variables.length <= parent.init.length) {
+            return false
+          }
+
+          return !(parent.init.indexOf(node) < parent.init.length - 1)
+        }
+
+        return false
+
+      case 'UnaryExpression':
+        switch (parent.type) {
+          case 'UnaryExpression':
+            return (
+              node.operator === parent.operator &&
+              (node.operator === '+' || node.operator === '-')
+            )
+          case 'BinaryExpression':
+            return parent.operator === '^' && parent.left === node
+          default:
+            return false
+        }
+
+      case 'BooleanLiteral':
+      case 'NilLiteral':
+      case 'NumericLiteral':
+      case 'StringLiteral':
+      case 'TableConstructorExpression':
+      case 'FunctionDeclaration':
+        return (
+          (parent.type === 'CallExpression' ||
+            parent.type === 'MemberExpression' ||
+            parent.type === 'IndexExpression' ||
+            parent.type === 'TableCallExpression' ||
+            parent.type === 'StringCallExpression') &&
+          parent.base === node
+        )
+
+      case 'LogicalExpression':
+      case 'BinaryExpression':
+        switch (parent.type) {
+          case 'UnaryExpression':
+            return true
+          case 'CallExpression':
+            return true
+          case 'BinaryExpression':
+          case 'LogicalExpression':
+            const nodePrecedence = getOperatorPrecedence(node.operator)
+            const parentPrecedence = getOperatorPrecedence(parent.operator)
+
+            if (parentPrecedence > nodePrecedence) {
+              return true
+            }
+
+            if (parent.operator === 'or' && node.operator === 'and') {
+              return true
+            }
+
+            const haveSamePrecedence = parentPrecedence === nodePrecedence
+            const haveSameOperator = parent.operator === node.operator
+            const isLeft = parent.left === node
+            if (haveSamePrecedence && !haveSameOperator && isLeft) {
+              return true
+            }
+
+            if (
+              haveSamePrecedence &&
+              !shouldFlatten(node.operator, parent.operator)
+            ) {
+              return true
+            }
+        }
+        return false
+    }
+
+    return false
   }
 }

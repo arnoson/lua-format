@@ -188,3 +188,84 @@ export function isNextLineEmpty(
 
   return hasNewLine(text, idx)
 }
+
+export const hasPrecedence = (node: Node) =>
+  node.type === 'LogicalExpression' || node.type === 'BinaryExpression'
+
+export const needsPrecedence = (node: Node) =>
+  ['BinaryExpression', 'LogicalExpression'].includes(node.type)
+
+// Luaparse's `getBinaryPrecedence` function.
+// https://github.com/fstirlitz/luaparse/blob/d61c6fe1cd2757bc210898bc9b263ffe4adbd060/luaparse.js#L2380
+export const getOperatorPrecedence = (operator: string): number => {
+  const charCode = operator.charCodeAt(0)
+  const length = operator.length
+
+  if (1 === length) {
+    switch (charCode) {
+      case 94:
+        return 12 // ^
+      case 42:
+      case 47:
+      case 37:
+        return 10 // * / %
+      case 43:
+      case 45:
+        return 9 // + -
+      case 38:
+        return 6 // &
+      case 126:
+        return 5 // ~
+      case 124:
+        return 4 // |
+      case 60:
+      case 62:
+        return 3 // < >
+    }
+  } else if (2 === length) {
+    switch (charCode) {
+      case 47:
+        return 10
+      case 46:
+        return 8 // ..
+      case 60:
+      case 62:
+        if ('<<' === operator || '>>' === operator) return 7 // << >>
+        return 3 // <= >=
+      case 61:
+      case 126:
+        return 3 // == ~=
+      case 111:
+        return 1 // or
+    }
+  } else if (97 === charCode && 'and' === operator) return 2
+  return 0
+}
+
+const equalityOperators = ['==', '!=', '===', '!==', '<>', '<=>']
+const multiplicativeOperators = ['*', '/', '%']
+export const shouldFlatten = (operator: string, parentOperator: string) => {
+  // ^ is right-associative
+  // x ^ y ^ z --> x ^ (y ^ z)
+  if (parentOperator === '^') {
+    return false
+  }
+
+  // x == y == z --> (x == y) == z
+  if (
+    equalityOperators.includes(parentOperator) &&
+    equalityOperators.includes(operator)
+  ) {
+    return false
+  }
+
+  // x * y % z --> (x * y) % z
+  if (
+    (operator === '%' && multiplicativeOperators.includes(parentOperator)) ||
+    (parentOperator === '%' && multiplicativeOperators.includes(operator))
+  ) {
+    return false
+  }
+
+  return true
+}
